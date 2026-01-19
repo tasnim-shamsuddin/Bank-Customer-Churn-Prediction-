@@ -70,7 +70,7 @@ def __getattr__(name):
         global OpenWrapper
         OpenWrapper = open
         return OpenWrapper
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    raise AttributeError(name)
 
 
 # Pretend this exception was created here.

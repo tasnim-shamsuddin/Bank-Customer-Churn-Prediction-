@@ -154,11 +154,15 @@ class Random(_random.Random):
         elif version == 2 and isinstance(a, (str, bytes, bytearray)):
             if isinstance(a, str):
                 a = a.encode()
-            a = int.from_bytes(a + _sha512(a).digest())
+            a = int.from_bytes(a + _sha512(a).digest(), 'big')
 
         elif not isinstance(a, (type(None), int, float, str, bytes, bytearray)):
-            raise TypeError('The only supported seed types are: None,\n'
-                            'int, float, str, bytes, and bytearray.')
+            _warn('Seeding based on hashing is deprecated\n'
+                  'since Python 3.9 and will be removed in a subsequent '
+                  'version. The only \n'
+                  'supported seed types are: None, '
+                  'int, float, str, bytes, and bytearray.',
+                  DeprecationWarning, 2)
 
         super().seed(a)
         self.gauss_next = None
@@ -233,8 +237,10 @@ class Random(_random.Random):
                 break
 
     def _randbelow_with_getrandbits(self, n):
-        "Return a random int in the range [0,n).  Defined for n > 0."
+        "Return a random int in the range [0,n).  Returns 0 if n==0."
 
+        if not n:
+            return 0
         getrandbits = self.getrandbits
         k = n.bit_length()  # don't use (n-1) here because n can be 1
         r = getrandbits(k)  # 0 <= r < 2**k
@@ -243,7 +249,7 @@ class Random(_random.Random):
         return r
 
     def _randbelow_without_getrandbits(self, n, maxsize=1<<BPF):
-        """Return a random int in the range [0,n).  Defined for n > 0.
+        """Return a random int in the range [0,n).  Returns 0 if n==0.
 
         The implementation does not use getrandbits, but only random.
         """
@@ -254,6 +260,8 @@ class Random(_random.Random):
                 "enough bits to choose from a population range this large.\n"
                 "To remove the range limitation, add a getrandbits() method.")
             return _floor(random() * n)
+        if n == 0:
+            return 0
         rem = maxsize % n
         limit = (maxsize - rem) / maxsize   # int(limit * maxsize) % n == 0
         r = random()
@@ -366,21 +374,37 @@ class Random(_random.Random):
 
     def choice(self, seq):
         """Choose a random element from a non-empty sequence."""
-        if not seq:
-            raise IndexError('Cannot choose from an empty sequence')
+        # raises IndexError if seq is empty
         return seq[self._randbelow(len(seq))]
 
-    def shuffle(self, x):
-        """Shuffle list x in place, and return None."""
+    def shuffle(self, x, random=None):
+        """Shuffle list x in place, and return None.
 
-        randbelow = self._randbelow
-        for i in reversed(range(1, len(x))):
-            # pick an element in x[:i+1] with which to exchange x[i]
-            j = randbelow(i + 1)
-            x[i], x[j] = x[j], x[i]
+        Optional argument random is a 0-argument function returning a
+        random float in [0.0, 1.0); if it is the default None, the
+        standard random.random will be used.
+
+        """
+
+        if random is None:
+            randbelow = self._randbelow
+            for i in reversed(range(1, len(x))):
+                # pick an element in x[:i+1] with which to exchange x[i]
+                j = randbelow(i + 1)
+                x[i], x[j] = x[j], x[i]
+        else:
+            _warn('The *random* parameter to shuffle() has been deprecated\n'
+                  'since Python 3.9 and will be removed in a subsequent '
+                  'version.',
+                  DeprecationWarning, 2)
+            floor = _floor
+            for i in reversed(range(1, len(x))):
+                # pick an element in x[:i+1] with which to exchange x[i]
+                j = floor(random() * (i + 1))
+                x[i], x[j] = x[j], x[i]
 
     def sample(self, population, k, *, counts=None):
-        """Chooses k unique random elements from a population sequence.
+        """Chooses k unique random elements from a population sequence or set.
 
         Returns a new list containing elements from the population while
         leaving the original population unchanged.  The resulting list is
@@ -433,8 +457,13 @@ class Random(_random.Random):
         # causing them to eat more entropy than necessary.
 
         if not isinstance(population, _Sequence):
-            raise TypeError("Population must be a sequence.  "
-                            "For dicts or sets, use sorted(d).")
+            if isinstance(population, _Set):
+                _warn('Sampling from a set deprecated\n'
+                      'since Python 3.9 and will be removed in a subsequent version.',
+                      DeprecationWarning, 2)
+                population = tuple(population)
+            else:
+                raise TypeError("Population must be a sequence.  For dicts or sets, use sorted(d).")
         n = len(population)
         if counts is not None:
             cum_counts = list(_accumulate(counts))
@@ -538,7 +567,7 @@ class Random(_random.Random):
             low, high = high, low
         return low + (high - low) * _sqrt(u * c)
 
-    def normalvariate(self, mu=0.0, sigma=1.0):
+    def normalvariate(self, mu, sigma):
         """Normal distribution.
 
         mu is the mean, and sigma is the standard deviation.
@@ -559,7 +588,7 @@ class Random(_random.Random):
                 break
         return mu + z * sigma
 
-    def gauss(self, mu=0.0, sigma=1.0):
+    def gauss(self, mu, sigma):
         """Gaussian distribution.
 
         mu is the mean, and sigma is the standard deviation.  This is
@@ -792,14 +821,14 @@ class SystemRandom(Random):
 
     def random(self):
         """Get the next random number in the range [0.0, 1.0)."""
-        return (int.from_bytes(_urandom(7)) >> 3) * RECIP_BPF
+        return (int.from_bytes(_urandom(7), 'big') >> 3) * RECIP_BPF
 
     def getrandbits(self, k):
         """getrandbits(k) -> x.  Generates an int with k random bits."""
         if k < 0:
             raise ValueError('number of bits must be non-negative')
         numbytes = (k + 7) // 8                       # bits / 8 and rounded up
-        x = int.from_bytes(_urandom(numbytes))
+        x = int.from_bytes(_urandom(numbytes), 'big')
         return x >> (numbytes * 8 - k)                # trim excess bits
 
     def randbytes(self, n):

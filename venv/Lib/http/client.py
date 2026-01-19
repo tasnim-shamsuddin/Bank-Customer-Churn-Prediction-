@@ -448,6 +448,7 @@ class HTTPResponse(io.BufferedIOBase):
         return self.fp is None
 
     def read(self, amt=None):
+        """Read and return the response body, or up to the next amt bytes."""
         if self.fp is None:
             return b""
 
@@ -593,8 +594,8 @@ class HTTPResponse(io.BufferedIOBase):
                     amt -= chunk_left
                 self.chunk_left = 0
             return b''.join(value)
-        except IncompleteRead as exc:
-            raise IncompleteRead(b''.join(value)) from exc
+        except IncompleteRead:
+            raise IncompleteRead(b''.join(value))
 
     def _readinto_chunked(self, b):
         assert self.chunked != _UNKNOWN

@@ -25,13 +25,16 @@ currently not entirely compliant with this RFC due to defacto
 scenarios for parsing, and for backward compatibility purposes, some
 parsing quirks from older RFCs are retained. The testcases in
 test_urlparse.py provides a good indicator of parsing behavior.
+
+The WHATWG URL Parser spec should also be considered.  We are not compliant with
+it either due to existing user code API behavior expectations (Hyrum's Law).
+It serves as a useful guide when making changes.
 """
 
-from collections import namedtuple
-import functools
 import re
 import sys
 import types
+import collections
 import warnings
 
 __all__ = ["urlparse", "urlunparse", "urljoin", "urldefrag",
@@ -79,13 +82,22 @@ scheme_chars = ('abcdefghijklmnopqrstuvwxyz'
                 '0123456789'
                 '+-.')
 
+# Leading and trailing C0 control and space to be stripped per WHATWG spec.
+# == "".join([chr(i) for i in range(0, 0x20 + 1)])
+_WHATWG_C0_CONTROL_OR_SPACE = '\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f '
+
 # Unsafe bytes to be removed per WHATWG spec
 _UNSAFE_URL_BYTES_TO_REMOVE = ['\t', '\r', '\n']
 
+# XXX: Consider replacing with functools.lru_cache
+MAX_CACHE_SIZE = 20
+_parse_cache = {}
+
 def clear_cache():
-    """Clear internal performance caches. Undocumented; some tests want it."""
-    urlsplit.cache_clear()
-    _byte_quoter_factory.cache_clear()
+    """Clear the parse cache and the quoters cache."""
+    _parse_cache.clear()
+    _safe_quoters.clear()
+
 
 # Helpers for bytes handling
 # For 3.2, we deliberately require applications that
@@ -167,12 +179,11 @@ class _NetlocResultMixinBase(object):
     def port(self):
         port = self._hostinfo[1]
         if port is not None:
-            try:
-                port = int(port, 10)
-            except ValueError:
-                message = f'Port could not be cast to integer value as {port!r}'
-                raise ValueError(message) from None
-            if not ( 0 <= port <= 65535):
+            if port.isdigit() and port.isascii():
+                port = int(port)
+            else:
+                raise ValueError(f"Port could not be cast to integer value as {port!r}")
+            if not (0 <= port <= 65535):
                 raise ValueError("Port out of range 0-65535")
         return port
 
@@ -238,6 +249,8 @@ class _NetlocResultMixinBytes(_NetlocResultMixinBase, _ResultMixinBytes):
             port = None
         return hostname, port
 
+
+from collections import namedtuple
 
 _DefragResultBase = namedtuple('DefragResult', 'url fragment')
 _SplitResultBase = namedtuple(
@@ -428,9 +441,6 @@ def _checknetloc(netloc):
             raise ValueError("netloc '" + netloc + "' contains invalid " +
                              "characters under NFKC normalization")
 
-# typed=True avoids BytesWarnings being emitted during cache key
-# comparison since this API supports both bytes and str input.
-@functools.lru_cache(typed=True)
 def urlsplit(url, scheme='', allow_fragments=True):
     """Parse a URL into 5 components:
     <scheme>://<netloc>/<path>?<query>#<fragment>
@@ -453,12 +463,22 @@ def urlsplit(url, scheme='', allow_fragments=True):
     """
 
     url, scheme, _coerce_result = _coerce_args(url, scheme)
+    # Only lstrip url as some applications rely on preserving trailing space.
+    # (https://url.spec.whatwg.org/#concept-basic-url-parser would strip both)
+    url = url.lstrip(_WHATWG_C0_CONTROL_OR_SPACE)
+    scheme = scheme.strip(_WHATWG_C0_CONTROL_OR_SPACE)
 
     for b in _UNSAFE_URL_BYTES_TO_REMOVE:
         url = url.replace(b, "")
         scheme = scheme.replace(b, "")
 
     allow_fragments = bool(allow_fragments)
+    key = url, scheme, allow_fragments, type(url), type(scheme)
+    cached = _parse_cache.get(key, None)
+    if cached:
+        return _coerce_result(cached)
+    if len(_parse_cache) >= MAX_CACHE_SIZE: # avoid runaway growth
+        clear_cache()
     netloc = query = fragment = ''
     i = url.find(':')
     if i > 0:
@@ -479,6 +499,7 @@ def urlsplit(url, scheme='', allow_fragments=True):
         url, query = url.split('?', 1)
     _checknetloc(netloc)
     v = SplitResult(scheme, netloc, url, query, fragment)
+    _parse_cache[key] = v
     return _coerce_result(v)
 
 def urlunparse(components):
@@ -740,13 +761,12 @@ def parse_qsl(qs, keep_blank_values=False, strict_parsing=False,
     # is less than max_num_fields. This prevents a memory exhaustion DOS
     # attack via post bodies with many fields.
     if max_num_fields is not None:
-        num_fields = 1 + qs.count(separator) if qs else 0
+        num_fields = 1 + qs.count(separator)
         if max_num_fields < num_fields:
             raise ValueError('Max number of fields exceeded')
 
     r = []
-    query_args = qs.split(separator) if qs else []
-    for name_value in query_args:
+    for name_value in qs.split(separator):
         if not name_value and not strict_parsing:
             continue
         nv = name_value.split('=', 1)
@@ -782,30 +802,23 @@ _ALWAYS_SAFE = frozenset(b'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
                          b'0123456789'
                          b'_.-~')
 _ALWAYS_SAFE_BYTES = bytes(_ALWAYS_SAFE)
+_safe_quoters = {}
 
-def __getattr__(name):
-    if name == 'Quoter':
-        warnings.warn('Deprecated in 3.11. '
-                      'urllib.parse.Quoter will be removed in Python 3.14. '
-                      'It was not intended to be a public API.',
-                      DeprecationWarning, stacklevel=2)
-        return _Quoter
-    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
-
-class _Quoter(dict):
-    """A mapping from bytes numbers (in range(0,256)) to strings.
+class Quoter(collections.defaultdict):
+    """A mapping from bytes (in range(0,256)) to strings.
 
     String values are percent-encoded byte values, unless the key < 128, and
-    in either of the specified safe set, or the always safe set.
+    in the "safe" set (either the specified safe set, or default set).
     """
-    # Keeps a cache internally, via __missing__, for efficiency (lookups
+    # Keeps a cache internally, using defaultdict, for efficiency (lookups
     # of cached keys don't call Python code at all).
     def __init__(self, safe):
         """safe: bytes object."""
         self.safe = _ALWAYS_SAFE.union(safe)
 
     def __repr__(self):
-        return f"<Quoter {dict(self)!r}>"
+        # Without this, will just display as a defaultdict
+        return "<%s %r>" % (self.__class__.__name__, dict(self))
 
     def __missing__(self, b):
         # Handle a cache miss. Store quoted string in cache and return.
@@ -884,11 +897,6 @@ def quote_plus(string, safe='', encoding=None, errors=None):
     string = quote(string, safe + space, encoding, errors)
     return string.replace(' ', '+')
 
-# Expectation: A typical program is unlikely to create more than 5 of these.
-@functools.lru_cache
-def _byte_quoter_factory(safe):
-    return _Quoter(safe).__getitem__
-
 def quote_from_bytes(bs, safe='/'):
     """Like quote(), but accepts a bytes object rather than a str, and does
     not perform string-to-bytes encoding.  It always returns an ASCII string.
@@ -902,11 +910,13 @@ def quote_from_bytes(bs, safe='/'):
         # Normalize 'safe' by converting to bytes and removing non-ASCII chars
         safe = safe.encode('ascii', 'ignore')
     else:
-        # List comprehensions are faster than generator expressions.
         safe = bytes([c for c in safe if c < 128])
     if not bs.rstrip(_ALWAYS_SAFE_BYTES + safe):
         return bs.decode()
-    quoter = _byte_quoter_factory(safe)
+    try:
+        quoter = _safe_quoters[safe]
+    except KeyError:
+        _safe_quoters[safe] = quoter = Quoter(safe).__getitem__
     return ''.join([quoter(char) for char in bs])
 
 def urlencode(query, doseq=False, safe='', encoding=None, errors=None,
@@ -940,9 +950,10 @@ def urlencode(query, doseq=False, safe='', encoding=None, errors=None,
             # but that's a minor nit.  Since the original implementation
             # allowed empty dicts that type of behavior probably should be
             # preserved for consistency
-        except TypeError as err:
+        except TypeError:
+            ty, va, tb = sys.exc_info()
             raise TypeError("not a valid non-string sequence "
-                            "or mapping object") from err
+                            "or mapping object").with_traceback(tb)
 
     l = []
     if not doseq:
@@ -1125,15 +1136,15 @@ def splitnport(host, defport=-1):
 def _splitnport(host, defport=-1):
     """Split host and port, returning numeric port.
     Return given default port if no ':' found; defaults to -1.
-    Return numerical port if a valid number are found after ':'.
+    Return numerical port if a valid number is found after ':'.
     Return None if ':' but not a valid number."""
     host, delim, port = host.rpartition(':')
     if not delim:
         host = port
     elif port:
-        try:
+        if port.isdigit() and port.isascii():
             nport = int(port)
-        except ValueError:
+        else:
             nport = None
         return host, nport
     return host, defport
