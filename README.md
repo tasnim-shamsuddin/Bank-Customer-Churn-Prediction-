@@ -146,7 +146,7 @@ bank-customer-churn-prediction/
 <img width="409" height="272" alt="image" src="https://github.com/user-attachments/assets/5d1c2875-29af-424e-a73c-882beee6ccfc" />
 
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/79a2d7a4-048c-466a-95cc-916cbbc833e3" />
+
 
 <img width="412" height="363" alt="image" src="https://github.com/user-attachments/assets/bf4ad3ba-4dbd-4405-824a-b354a47fd59b" />
 
