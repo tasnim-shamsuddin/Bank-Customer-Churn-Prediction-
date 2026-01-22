@@ -141,6 +141,19 @@ bank-customer-churn-prediction/
 ├── requirements.txt
 └── .gitignore
 ```
+## Results
+
+<img width="409" height="272" alt="image" src="https://github.com/user-attachments/assets/5d1c2875-29af-424e-a73c-882beee6ccfc" />
+
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/79a2d7a4-048c-466a-95cc-916cbbc833e3" />
+
+<img width="412" height="363" alt="image" src="https://github.com/user-attachments/assets/bf4ad3ba-4dbd-4405-824a-b354a47fd59b" />
+
+<img width="409" height="377" alt="image" src="https://github.com/user-attachments/assets/a9269212-e98e-4e76-82a4-10c28e4f7c39" />
+
+<img width="416" height="381" alt="image" src="https://github.com/user-attachments/assets/55969fe6-0ef6-4402-a606-470483d0b638" />
+<img width="419" height="387" alt="image" src="https://github.com/user-attachments/assets/b005f70d-78e0-4ff6-9211-171d24dee65d" />
 
 ---
 
@@ -149,7 +162,7 @@ bank-customer-churn-prediction/
 * Hyperparameter tuning for Neural Network
 * Comparison with traditional ML models (Logistic Regression, Random Forest, XGBoost)
 * Model deployment using Flask or FastAPI
-* Dashboard visualization
+
 
 ---
 
