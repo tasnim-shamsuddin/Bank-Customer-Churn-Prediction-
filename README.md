@@ -154,6 +154,8 @@ bank-customer-churn-prediction/
 
 <img width="416" height="381" alt="image" src="https://github.com/user-attachments/assets/55969fe6-0ef6-4402-a606-470483d0b638" />
 <img width="419" height="387" alt="image" src="https://github.com/user-attachments/assets/b005f70d-78e0-4ff6-9211-171d24dee65d" />
+The model shows stable convergence with decreasing loss and improving validation accuracy, 
+indicating good generalization without overfitting.
 
 ---
 
