@@ -142,6 +142,14 @@ bank-customer-churn-prediction/
 └── .gitignore
 ```
 ## Results
+## TensorBoard Results
+
+TensorBoard was used to monitor:
+- Training loss
+- Validation loss
+- Accuracy
+
+
 
 <img width="409" height="272" alt="image" src="https://github.com/user-attachments/assets/5d1c2875-29af-424e-a73c-882beee6ccfc" />
 
