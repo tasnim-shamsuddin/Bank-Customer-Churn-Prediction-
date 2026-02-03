@@ -122,25 +122,7 @@ The dataset contains customer demographic and banking information such as:
 
 ---
 
-## 📁 Project Structure
 
-```
-bank-customer-churn-prediction/
-│
-├── data/
-│   ├── raw/
-│   └── processed/
-│
-├── notebooks/
-│   └── bank_customer_churn_analysis.ipynb
-│
-├── models/
-│   └── preprocessed_data.pkl
-│
-├── README.md
-├── requirements.txt
-└── .gitignore
-```
 ## Results
 ## TensorBoard Results
 
